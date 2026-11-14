@@ -1,6 +1,6 @@
 # 任务单：ST 插件绑定契约批 + 插件批（两人分工）
 
-- 依据：[plugin-batch.md](plugin-batch.md)（插件批设计稿，本目录）；契约批设计稿在网关私有仓 `plan/st-plugin-binding/contract-batch.md`（预取 v1.33，未取号）。
+- 依据：[plugin-batch.md](plugin-batch.md)（插件批设计稿）、[contract-batch.md](contract-batch.md)（契约批设计稿），均在本目录；契约落地（api.md v1.33）在网关私有仓执行（预取 v1.33，未取号）。
 - 分工逻辑：接缝＝C1 契约冻结；人甲只碰网关仓（私有）、人乙只碰本公开仓，零共享文件。
 - 前置：本任务单随公开仓 docs PR 评审；签核后开 Linear 票——批A（契约批）入 Apercusgateway 项目，批B（插件批）入 apercus-sillytavern 新项目（Linear 新建，对应本公开仓）；之后每项工作先开分支、走 PR、填 Worklog。
 
@@ -9,7 +9,7 @@
 - [ ] **C1 契约 docs PR**（最先飞；contract-in-flight 一次一个）：`docs/api/api.md`（新「绑定」域三操作 + BalanceSnapshot 增列 + 头部 v1.33）、`docs/api/openapi.yaml` 0.11.98、`docs/api-changelog.md` v1.33 行、`docs/term-glossary.md` 词条、`scripts/contract/error-contract.mjs` 重锁、`plan/README.md` 索引登记。
   验收：契约评审门（含留决四项落地）＋ 脚本门禁（plan-refs / comment-hygiene / strict-yaml-validate）。
 - [ ] **C2 后端实现 PR**：migration 0053、绑定服务（CSPRNG、独立限频器、CAS、consume-once、key_hash 失效联动、no-store、DTO 脱敏）、BalanceSnapshot 两字段贯通、审批计配审计（用户发起形态）、Go 测试（并发恰一、approve→重置→poll 404、approve→禁用→poll 404）。
-  验收：`go test ./internal/store -count=1` 起步；HTTP 回归＝契约批设计稿 §6（网关私有仓，含全部安全断言）；独立 reviewer-1。
+  验收：`go test ./internal/store -count=1` 起步；HTTP 回归＝契约批设计稿 §6（本目录 [contract-batch.md](contract-batch.md)，含全部安全断言）；独立 reviewer-1。
 - [ ] **C3 门户批准页**：plugin 页面（手动输码、后果全文、比对指令、无自动批准路径）＋ SPA `frame-ancestors 'none'`/`X-Frame-Options: DENY` ＋ 批准路由 `Referrer-Policy: no-referrer`。
   验收：打开页面零副作用断言；无框嵌套测试。
   依赖：与 C2 收尾并行（同一批准端点契约）；C1 必须最先完成。
