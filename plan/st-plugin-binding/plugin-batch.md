@@ -1,5 +1,7 @@
 # apercus-sillytavern 插件批：绑定 + 防截断分节 + 计量（草稿 v2，待签核）
 
+> **执行修订记录（2026-11-15，网关侧 C1 契约 PR 回写）**：上游契约批实取 **v1.34/0.11.99**（预取 v1.33/0.11.98 已被网关 #446 消费；取号核查与 poll 事务谓词等修订详见 [contract-batch.md](contract-batch.md) 执行修订记录）。正文凡写 v1.33 处以 v1.34 为准；发布门控相应改为「**v1.34 合并前不得发布面向用户的版本**」。插件侧消费口径不变：pair 响应 `{device_code, user_code, expires_at}`（user_code 8 字符无连字符）、poll 两态 200（pending／`{binding:{key,username}}`）、404 单一语义 pairing_not_found（不存在/已消费/已过期/失效联动；未批准＝200 pending）、BalanceSnapshot 增列 `penalty_input_threshold`（H，仅展示阈值）与 `penalty_multiplier`（毫率 K≥1000，仅展示）。
+
 - 落位说明：本稿随公开插件仓 `plan/st-plugin-binding/` 交付；分工任务单与契约批设计稿见同目录。上游契约批（设备配对 + 余额阈值字段，v1.33）的网关侧落地在网关私有仓执行，本文只写插件侧消费口径，不含网关内部设计。
 - 上游依赖：网关契约批 v1.33（网关私有仓交付；对外口径＝设备配对三操作 + BalanceSnapshot 增列 `penalty_input_threshold` / `penalty_multiplier`）。**发布门控：v1.33 合并前不得发布面向用户的版本**；本地开发/测试用合成绑定（插件仓测试基建既有），不接真网关。
 - 版本基线：插件 manifest `minimum_client_version: 1.17.0`；本批事件与 API 已按 ST 1.19.0（当前稳定版）源码核对，运行时一律特性检测降级（附录 A）。
