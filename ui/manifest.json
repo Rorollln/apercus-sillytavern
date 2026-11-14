@@ -1,0 +1,12 @@
+{
+  "display_name": "Apercus Gateway",
+  "loading_order": 60,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "Apercus",
+  "version": "0.1.0",
+  "minimum_client_version": "1.17.0",
+  "homePage": ""
+}

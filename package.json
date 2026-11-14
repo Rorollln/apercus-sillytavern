@@ -1,0 +1,14 @@
+{
+  "name": "apercus-sillytavern",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Apercus Gateway SillyTavern UI extension and server plugin (unconnected first version)",
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check server/core.js && node --check server/index.js && node --check test/server-core.test.js && node --check test/server-plugin.test.js && node --check test/ui.logic.test.js && node --check ui/logic.mjs && node --input-type=module --check < ui/index.js"
+  }
+}

@@ -1,0 +1,7 @@
+node_modules/
+.deepwork/
+.v2c/
+coverage/
+*.log
+.env
+.env.*
