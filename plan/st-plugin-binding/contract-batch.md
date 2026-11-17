@@ -1,6 +1,6 @@
 # ST 插件网关连接 + 惩罚阈值暴露契约批（草稿 v3，待签核）
 
-> **执行修订记录（2026-11-16，设计重写 v2→v3）。** 2026-11-15/16 用户逐条拍板，连接体验从「设备配对三操作（8 字符用户码手动输码批准）」重设计为「官方网页授权＋插件服务端后台领取＋登录凭据体系」。v2 正文与其 2026-11-15 执行修订记录**整体作废**（全文见公开仓 PR #1/#2 git 历史），其中语义级 sec 修复在新设计中重推演（见 §8）。重写后契约号**初取 v1.34 / 0.11.99 → 2026-11-16 让位重编 v1.35 / 0.11.100**（#451 管理台调用示例 docs 批先合实占 v1.34/0.11.99，按「先合者持号、后合者让位」连号顺延，非烧号）。2026-11-16 增补：授权页仅加非本人提醒；门户「退出所有酒馆插件」（`POST /api/portal/me/plugin-credentials/revoke-all`）入 v1；审计/限频按 sec 核实修正；维持 v1.35/0.11.100、12 路径 12 操作；本次增量正式 sec 结论随 C1，不伪称已过。2026-11-17 增补（公开仓 PR #2 审查响应）：授权页后果文案改准确——断开插件（门户 revoke-all）与作废已交付 key（门户**既有** key 重置）为两步独立操作，不做组合动作（2026-11-17 用户拍板：只要取消授权功能，key 重置用网关已有能力）；未批准 poll 改列正向断言；批准成功页增「退出所有酒馆插件」入口；非本人提醒直接指向门户 revoke-all；钓鱼残余接受登记；契约号与路径数不变。同日续决：留决①＝登录凭据 TTL 滑动 7 天（查询面成功调用续期，含启动探活）；留决⑦＝`GET /api/plugin/me/key` 维持读零记录（残余接受，异常发现靠既有用量/调用记录）。
+> **执行修订记录（2026-11-16，设计重写 v2→v3）。** 2026-11-15/16 用户逐条拍板，连接体验从「设备配对三操作（8 字符用户码手动输码批准）」重设计为「官方网页授权＋插件服务端后台领取＋登录凭据体系」。v2 正文与其 2026-11-15 执行修订记录**整体作废**（全文见公开仓 PR #1/#2 git 历史），其中语义级 sec 修复在新设计中重推演（见 §8）。重写后契约号**初取 v1.34 / 0.11.99 → 2026-11-16 让位重编 v1.35 / 0.11.100**（#451 管理台调用示例 docs 批先合实占 v1.34/0.11.99，按「先合者持号、后合者让位」连号顺延，非烧号）。2026-11-16 增补：授权页仅加非本人提醒；门户「退出所有酒馆插件」（`POST /api/portal/me/plugin-credentials/revoke-all`）入 v1；审计/限频按 sec 核实修正；维持 v1.35/0.11.100、12 路径 12 操作；本次增量正式 sec 结论随 C1，不伪称已过。2026-11-17 增补（公开仓 PR #2 审查响应）：授权页后果文案改准确——断开插件（门户 revoke-all）与作废已交付 key（门户**既有** key 重置）为两步独立操作，不做组合动作（2026-11-17 用户拍板：只要取消授权功能，key 重置用网关已有能力）；未批准 poll 改列正向断言；批准成功页增「退出所有酒馆插件」入口；非本人提醒直接指向门户 revoke-all；钓鱼残余接受登记；契约号与路径数不变。同日续决：留决①＝登录凭据 TTL 滑动 7 天（查询面成功调用续期，含启动探活）；留决⑦＝`GET /api/plugin/me/key` 维持读零记录（残余接受，异常发现靠既有用量/调用记录）。同日复核网关 #452 三审清偿并后对齐：cancel 语义纠正为「仅无主且未过期（`expires_at>now`），过期→404 同码」（本稿前版「含过期行」方向相反，作废）；§2.6 keys / logout 响应形状对齐（`keys={keys:[…]}`、logout＝204 无 body）；§2.4 残余表述采纳「账号 key 钓鱼」；ST 1.17.0 Custom 源实证任务入任务单 P0。
 
 - 状态：三份设计稿（契约批 / 插件批 / 任务单）随公开插件仓 apercus-sillytavern `plan/st-plugin-binding/` docs PR 提交评审。网关侧实现（migration、连接服务、授权页、登录凭据体系）在网关私有仓执行。
 - 设计基线：用户 2026-11-15/16 逐条确认条款（免输码网页授权；授权状态归网关、Pass 仅替换登录来源；批准页 URL 携带请求引用、无人工核对码；插件服务端后台领取、无回调地址；交付＝现有用户 key 一把制；插件保存登录凭据、与 API key 分离；key/模型/余额沿用网关现有口径；退出登录与强制失效分离；凭据存酒馆服务端、多用户隔离；门户退出所有酒馆插件〔撤销全部插件登录凭据，不改 key/门户会话〕；授权页仅加非本人提醒〔无邮件/核对码/额外步骤〕）。
@@ -50,7 +50,7 @@ apercus-sillytavern（酒馆插件 = ST UI 扩展 + ST 服务端插件；ST 为�
   - 未批准：`{"status": "pending"}`
   - 已批准（恰一次）：`{"status": "approved", "connect": {"login_credential": string, "key": string, "username": string}}`。同事务 CAS 删行即消费；批准历史由审计行承载。`login_credential` 即 D4 登录凭据（§2.5），与本 key 同事务签发。
 - **失效联动（v2 sec 修复语义沿用）**：领取事务按序校验 ①未过期（`expires_at > now`）→ ②账号状态 `enabled` → ③交付 key 与批准时 `key_hash_snapshot` 同源（重算哈希相等）；任一失败 **404 且不消费**（行随 TTL 消亡，插件重新发起即可；进入登录凭据稳态后 key 变化走 §2.6 刷新，不再走本窗口）。效果：批准后、领取前发生 key 重置 / 账号禁用，该次领取拿不到任何 key（含重置后的新 key），防竞态探测。
-- 用户在授权页点「取消」→ 删除该无主行（§2.3 取消端点）；此后 poll 404。404 单一语义不可区分（不存在 / 已消费 / 已过期 / 失效联动 / 已取消），防枚举（v2 原则沿用）。错误序：429 限频先于查库。
+- 用户在授权页点「取消」→ 删除该无主且未过期行（§2.3 取消端点）；此后 poll 404。404 单一语义不可区分（不存在 / 已消费 / 已过期 / 失效联动 / 已取消），防枚举（v2 原则沿用）。错误序：429 限频先于查库。
 - 错误：`404 connect_request_not_found`（新码，逐字登记于 api.md 错误码表）；`422`；`429 rate_limited`（polling_secret ≥5 秒间隔＋可信 IP 30 次/分，独立限频器）；`500`。
 - 载体 DTO 带 key 与登录凭据，须实现 `String()`/`GoString()` 脱敏；禁止日志出现请求 / 响应体与任何密钥值。
 
@@ -59,7 +59,7 @@ apercus-sillytavern（酒馆插件 = ST UI 扩展 + ST 服务端插件；ST 为�
 - 鉴权：portal 会话＋精确同源 Origin（沿用 v2 D3）。授权页前端调用；**无人工输码**，`request_ref` 由页面从 URL 取得。
 - approve 请求：`{"request_ref": string}`；响应 `{"status": "approved"}`（`no-store`）。
 - 行为（CAS）：`UPDATE ... SET user_id=?, key_hash_snapshot=<当前 users.key_hash> WHERE request_ref_hash=? AND user_id IS NULL AND expires_at>now`，`RowsAffected=0` → `404 connect_request_not_found`（未知 / 已批准 / 已过期 / 并发抢批一概同码，恰一 200）。批准不改变 key 本身、不产生 key 新行。
-- cancel 请求：`{"request_ref": string}`；行为：`DELETE ... WHERE request_ref_hash=? AND user_id IS NULL`，幂等，404 同码。取消仅为无主请求的体面出路径，无安全语义。
+- cancel 请求：`{"request_ref": string}`；行为：`DELETE ... WHERE request_ref_hash=? AND user_id IS NULL AND expires_at>now`（仅无主**且未过期**；过期行留惰性清理、不由 cancel 删），幂等（首次 200，其后 404 同码）。行已批准 / 已消费 / 不存在 / **已过期** → 404 connect_request_not_found 同码不可区分。取消仅为无主请求的体面出路径，无安全语义。（2026-11-17 按网关契约 connect-0.4 对齐——本稿前版「仅无主含过期行」的统一方向相反，作废。）
 - 审计（同事务，沿用 v2 修复）：`admin_id=NULL`、`admin_name="user:<用户名>"`、`object_type="connect_request"`、`object_id=<行 id>`（AUTOINCREMENT 复用防护）、`change_summary` 固定模板含 user_id（users.username 非唯一）、摘要不含任何码值。cancel 不审计（无授权语义）。
 - 错误：`401 unauthorized/session_expired`、`403 user_disabled/permission_denied/origin_forbidden`、`404 connect_request_not_found`、`422`、`429 rate_limited`（按用户 10 次/分＋可信 IP 30 次/分，独立限频器）、`500`。
 - 并发测试：双 approve 恰一 200；approve 与 poll 消费并发恰一交付。
@@ -75,7 +75,7 @@ apercus-sillytavern（酒馆插件 = ST UI 扩展 + ST 服务端插件；ST 为�
 ### 2.4 网关授权页（非契约件，随批实现）
 
 - 打开即读门户会话：已登录 → 直接进入批准视图；未登录 → 先登录（现邮箱码；Pass 迁移后自动切换，契约不可见），登录后回到批准视图。回跳只携带 `request_ref`（免输码机制本体，非 v2 所禁的「凭据预填」）。
-- 批准视图打开即展示：当前账号用户名、后果全文（「允许后此插件将取得你的**完整 API key** 并代表你调用网关；要断开插件，请在门户执行『退出所有酒馆插件』；该操作不使已交付 key 失效——如需作废已交付 key，请再在门户重置网关 key〔旧 key 立即失效，首次无冷却、之后 7 天一次，所有门户设备需重新登录〕」）、醒目提示「如果不是你刚刚在酒馆里发起的，请取消，并在门户『退出所有酒馆插件』断开」、[允许] [取消] 两键；**无自动批准路径**，必须人工点击；提醒仅告知，不引入邮件/核对码/额外确认步骤；诱导批准残余接受，不称已消除。
+- 批准视图打开即展示：当前账号用户名、后果全文（「允许后此插件将取得你的**完整 API key** 并代表你调用网关；要断开插件，请在门户执行『退出所有酒馆插件』；该操作不使已交付 key 失效——如需作废已交付 key，请再在门户重置网关 key〔旧 key 立即失效，首次无冷却、之后 7 天一次，所有门户设备需重新登录〕」）、醒目提示「如果不是你刚刚在酒馆里发起的，请取消，并在门户『退出所有酒馆插件』断开」、[允许] [取消] 两键；**无自动批准路径**，必须人工点击；提醒仅告知，不引入邮件/核对码/额外确认步骤；诱导批准／账号 key 钓鱼残余接受，不称已消除（#452 三审建议直称「账号 key 钓鱼」）。
 - 批准成功页（非契约件，随批实现，2026-11-17 增补）：提示连接已完成，并提供「退出所有酒馆插件」入口（跳转门户对应页面）；除该入口外不留其他管理面（留决②不变）。
 - 加固沿用 v2 sec 修复：SPA `Content-Security-Policy: frame-ancestors 'none'` ＋ `X-Frame-Options: DENY`；授权与取消路由 `Referrer-Policy: no-referrer`。
 - 测试：打开页面零副作用；提醒文案在场；成功页「退出所有酒馆插件」入口在场；无邮件/核对码/额外步骤；无自动提交路径；无框嵌套；未登录登录后正确回到批准视图；诱导批准残余登记。**残余接受记录（2026-11-17 用户确认）**：批准后无单条撤销入口、无「已连接插件」列表/最近使用可见性——发现异常连接的途径＝门户 revoke-all 全量断开＋既有 key 重置兜底；此残余 C1 前如有异议再议。
@@ -92,12 +92,12 @@ apercus-sillytavern（酒馆插件 = ST UI 扩展 + ST 服务端插件；ST 为�
 | 端点 | 返回 | 说明 |
 |---|---|---|
 | `GET /api/plugin/me` | `{username}` | 账号确认（登录状态探活） |
-| `GET /api/plugin/me/keys` | `[{id, name, masked, status}]` | 当前账号有权使用的 key 列表；**不含明文**；v1 恒一把，结构向后兼容多 key（D6） |
+| `GET /api/plugin/me/keys` | `{keys: [{id, name, masked, status}]}` | 当前账号有权使用的 key 列表；**不含明文**；v1 恒一把，结构向后兼容多 key（D6）；值域钉死 `id=default` / `name=默认 key` / `status=enabled`（#452 清偿） |
 | `GET /api/plugin/me/key` | `{key, username}` | 当前调用凭据交付（语义＝门户「查看 key」的插件形态）；key 重置后的刷新入口（D4），登录凭据不变 |
 | `GET /api/plugin/me/models` | 所选 key 权限内模型目录 | 沿用目录与权限口径；插件按酒馆适配能力过滤展示 |
 | `GET /api/plugin/me/balance` | BalanceSnapshot（含 §3 两字段） | 沿用现有口径 |
 | `GET /api/plugin/me/usage` | 用量（沿用现有口径） | |
-| `POST /api/plugin/logout` | `{}` | 撤销本次登录凭据（D5） |
+| `POST /api/plugin/logout` | 204 无 body | 撤销本次登录凭据（D5） |
 
 - 全部 `no-store`；查询面错误复用现有信封；`401`（凭据无效 / 过期 / 账号禁用，插件据此显示重新授权）；限频按凭据＋可信 IP（独立限频器）；权限恒＝本人账号，无跨账号面。读操作不写审计（含 `GET /api/plugin/me/key`；2026-11-17 用户拍板不留记录，残余登记见 §8 留决⑦）；logout 写审计（同事务，形态同 §2.3）。
 
@@ -117,7 +117,7 @@ apercus-sillytavern（酒馆插件 = ST UI 扩展 + ST 服务端插件；ST 为�
 
 两张新表（migration 号随实现批取当期空号，起草时点 0054/0055——0053 已由管理台实现批实占）：
 
-- `connect_requests`：`id INTEGER PRIMARY KEY AUTOINCREMENT, request_ref_hash(uniq, sha256), polling_secret_hash(uniq, sha256), user_id(NULL=未批准), key_hash_snapshot(NULL=未批准), expires_at`。无 status 列；消费＝删行；取消＝删行（仅无主，含过期行——过期无主行语义同惰性清理，与 §2.3 DELETE 条件一致）；过期行读时视同不存在、创建时顺带删除（清理先于存活上限判定）。
+- `connect_requests`：`id INTEGER PRIMARY KEY AUTOINCREMENT, request_ref_hash(uniq, sha256), polling_secret_hash(uniq, sha256), user_id(NULL=未批准), key_hash_snapshot(NULL=未批准), expires_at`。无 status 列；消费＝删行；取消＝删行（仅无主且未过期，`expires_at>now`；过期行留惰性清理——与网关契约 connect-0.4 对齐，2026-11-17 纠正）；过期行读时视同不存在、创建时顺带删除（清理先于存活上限判定）。
 - 插件登录凭据簿记：`id INTEGER PRIMARY KEY AUTOINCREMENT, credential_hash(uniq, sha256), user_id, created_at, expires_at`（命名与列随实现批对齐 sessions 范式；撤销＝删行）。撤销全部＝按 user_id 删凭据行（含过期行）＋删除 `user_id=当前用户 AND expires_at>now` 的已批准未领取请求；逐影响对象审计（`action="revoke"`、`object_id`＝真实行 id），零删除不审计、审计失败回滚；不引入哨兵/epoch。
 
 随批更新 `docs/db-schema.md` / `docs/db-data-dictionary.md`（表数随当期＋2）与审计用户发起形态说明（动作枚举增 `approve`/`logout`/`revoke`；两张新表 `id` 均须 AUTOINCREMENT）。哈希口径见 D9。

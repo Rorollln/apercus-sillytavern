@@ -18,7 +18,7 @@
 
 ## 人乙（插件侧：JS + node:test）
 
-- [ ] **P0 插件仓 docs PR（完整条款修订，2026-11-17 扩）**：① AGENTS 凭据保存条款——「服务端不写 ST secret」放宽为「登录凭据与 key 存 ST 服务端 secret（按 directories 隔离，命名空间 `apercus_gateway`），浏览器零保存」（v3 D8，2026-11-16 用户拍板）；② AGENTS 固定目标口径扩齐——「目录 / 余额两常量端点」扩为「两常量端点＋连接域与查询面同走固定网关域名」，与 plugin-batch 口径统一；③ README 能力 / 路由 / 状态描述同步（含 Custom 源接入将另存 `api_key_custom` 的写明）；④ **P1 / P3 依赖 P0 合入后才开工；P2 不依赖、可先行**。
+- [ ] **P0 插件仓 docs PR（完整条款修订，2026-11-17 扩）**：① AGENTS 凭据保存条款——「服务端不写 ST secret」放宽为「登录凭据与 key 存 ST 服务端 secret（按 directories 隔离，命名空间 `apercus_gateway`），浏览器零保存」（v3 D8，2026-11-16 用户拍板）；② AGENTS 固定目标口径扩齐——「目录 / 余额两常量端点」扩为「两常量端点＋连接域与查询面同走固定网关域名」，与 plugin-batch 口径统一；③ README 能力 / 路由 / 状态描述同步（含 Custom 源接入将另存 `api_key_custom` 的写明）；④ **P1 / P3 依赖 P0 合入后才开工；P2 不依赖、可先行**；⑤ 按 ST 1.17.0 源码实证「接入 Custom OpenAI-compatible 源后 URL/key 保存路径不进浏览器存储 / DOM」，结论登记 README（#452 三审残余清单提出）。
 - [ ] **P1＝B1 网关连接**：官方授权页打开、后台轮询领取、登录凭据与 key 落密钥库、保持登录（重开不重复授权）、key 重置自动刷新、退出登录。依赖：C1 字段冻结（开发期 stub 网关，不接真网关）。
 - [ ] **P2＝B2 防截断**：`PRESET_CHANGED` 检测（仅 chat 预设）、惰性指纹、`POST /plan` 代理、校验与兜底、指纹缓存、注入、工具/响应格式守卫。对接 #443/#444 既有契约，不受 v3 重设计影响。
 - [ ] **P3＝B3 key/模型选择 + 计量**：key 列表与选用、所选 key 模型目录、自动接入酒馆 Custom 源（连接状态沿用酒馆）、余额 + 阈值条（BigInt fail-closed，K 仅展示）、上下文计量。
