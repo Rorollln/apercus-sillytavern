@@ -9,6 +9,30 @@
     overflow-wrap: anywhere;
 }
 
+/* 复用 ST 的 inline-drawer：标题栏可点击收起/展开，内容默认隐藏。 */
+.ag-drawer {
+    width: 100%;
+    max-width: 100%;
+}
+
+.ag-drawer .inline-drawer-header {
+    padding: 2px 5px;
+    min-width: 0;
+}
+
+.ag-drawer .ag-header {
+    flex: 1 1 auto;
+}
+
+.ag-drawer .inline-drawer-icon {
+    flex: none;
+    margin-left: 6px;
+}
+
+.ag-panel.inline-drawer-content {
+    margin-top: 4px;
+}
+
 /* 实机冒烟发现：ST 的 button/menu_button 类自带 display，会覆盖 [hidden] 的 UA 样式，
    导致插件里 hidden=true 的按钮仍然可见。面板内统一强制隐藏。 */
 .ag-panel [hidden] {

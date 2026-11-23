@@ -183,7 +183,7 @@ function isPlainObj(value) {
 
 function buildPanel() {
     const root = h('div', 'extension_container ag-root');
-    const panel = h('section', 'ag-panel');
+    const panel = h('section', 'ag-panel inline-drawer-content');
     panel.id = 'apercus_gateway_panel';
     panel.setAttribute('aria-labelledby', 'apercus_gateway_title');
     panel.tabIndex = -1;
@@ -196,6 +196,18 @@ function buildPanel() {
     const dot = h('span', 'ag-dot ag-dot-unknown');
     dot.setAttribute('aria-hidden', 'true');
     header.append(heading, stamp, dot);
+
+    // 与 ST 其他扩展一致：整块放进 inline-drawer，标题栏可点击收起/展开。
+    const drawer = h('div', 'inline-drawer ag-drawer');
+    const headerToggle = h('div', 'inline-drawer-toggle inline-drawer-header');
+    headerToggle.setAttribute('role', 'button');
+    headerToggle.setAttribute('tabindex', '0');
+    headerToggle.setAttribute('aria-expanded', 'false');
+    headerToggle.setAttribute('aria-labelledby', 'apercus_gateway_title');
+    const drawerIcon = h('div', 'fa-solid fa-circle-chevron-down inline-drawer-icon down');
+    drawerIcon.setAttribute('aria-hidden', 'true');
+    headerToggle.append(header, drawerIcon);
+    drawer.append(headerToggle, panel);
 
     const statusLine = h('p', 'ag-status');
     statusLine.setAttribute('role', 'status');
@@ -267,7 +279,6 @@ function buildPanel() {
     version.textContent = '版本说明：已按 SillyTavern 1.17.0 源码核对，并在本地 1.17.0 实例做过安装加载冒烟（非验收）；不声明支持其他版本。';
 
     panel.append(
-        header,
         statusLine,
         protocolLine,
         authBlock,
@@ -287,7 +298,28 @@ function buildPanel() {
     );
     if (antitruncSection) panel.append(antitruncSection.wrap);
     panel.append(boundary, version);
-    root.append(panel);
+    root.append(drawer);
+
+    // ST 在 document 上监听 .inline-drawer-toggle 并执行 slideToggle；这里只
+    // 补键盘操作与 aria-expanded 同步（等 ST 更新完 icon class 再读状态）。
+    const syncDrawerAria = () => {
+        headerToggle.setAttribute(
+            'aria-expanded',
+            drawerIcon.classList.contains('up') ? 'true' : 'false',
+        );
+    };
+    headerToggle.addEventListener('click', () => {
+        window.setTimeout(syncDrawerAria, 0);
+    });
+    drawer.addEventListener('inline-drawer-toggle', () => {
+        window.setTimeout(syncDrawerAria, 0);
+    });
+    headerToggle.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            headerToggle.click();
+        }
+    });
 
     loginButton.addEventListener('click', () => { void doConnect(); });
     logoutButton.addEventListener('click', () => { void doLogout(); });
@@ -298,6 +330,9 @@ function buildPanel() {
 
     return {
         root,
+        drawer,
+        headerToggle,
+        drawerIcon,
         panel,
         statusLine,
         dot,
@@ -951,6 +986,10 @@ function openPanel() {
     if (drawer && drawer.classList.contains('closedDrawer')) {
         const toggle = document.querySelector('#extensions-settings-button .drawer-icon');
         if (toggle) toggle.click();
+    }
+    // 快捷按钮打开面板时展开本插件折叠块；用户仍可点标题栏重新收起。
+    if (els.drawerIcon && els.drawerIcon.classList.contains('down')) {
+        els.headerToggle.click();
     }
     window.setTimeout(() => {
         els.panel.scrollIntoView({ block: 'center' });

@@ -555,6 +555,17 @@ before(async () => {
     assert.equal(mod.state.status && mod.state.status.ok, true);
 });
 
+test('panel is mounted as an ST inline-drawer with a collapsible header', () => {
+    assert.ok(mod.els.drawer);
+    assert.ok(mod.els.drawer.className.includes('inline-drawer'));
+    assert.ok(mod.els.headerToggle.className.includes('inline-drawer-toggle'));
+    assert.equal(mod.els.headerToggle.getAttribute('aria-expanded'), 'false');
+    assert.ok(mod.els.drawerIcon.className.includes('inline-drawer-icon'));
+    assert.ok(mod.els.panel.className.includes('inline-drawer-content'));
+    assert.equal(mod.els.panel.parentElement, mod.els.drawer);
+    assert.equal(mod.els.drawer.children[0], mod.els.headerToggle);
+});
+
 // ---------- A：活动设置优先 ----------
 
 test('readSelectedPreset prefers live chatCompletionSettings over the saved preset copy', () => {

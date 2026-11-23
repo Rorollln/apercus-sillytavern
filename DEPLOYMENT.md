@@ -61,7 +61,7 @@
 ## 7. 验收
 
 ```bash
-node --test       # 334 tests, isolated stubs/mock
+node --test       # 335 tests, isolated stubs/mock
 npm run check
 ```
 
