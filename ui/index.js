@@ -1170,9 +1170,13 @@ function renderStatus() {
     }
     els.loginButton.textContent = state.connectPending ? '正在连接…' : '连接 Apercus';
     els.loginButton.disabled = state.connectPending;
-    // G10：本地清理失败的登录失效（invalid + login_invalidated）仍显示退出
-    // 重试入口——服务端只保留失效标记，重试是唯一的本地清理路径。
-    const retryLogout = value.state === 'invalid' && value.reason === 'login_invalidated';
+    // G10：只有本地清理不完整时才会显示退出重试入口。清理已确认成功
+    // （local_cleared/custom_cleared=true）时重试 logout 只会因无信封的
+    // Custom 条目进入 uncertain 并强制清空用户设置，应改为重新连接提示。
+    const cleanupIncomplete = value.local_cleared !== true || value.custom_cleared !== true;
+    const retryLogout = value.state === 'invalid'
+        && value.reason === 'login_invalidated'
+        && cleanupIncomplete;
     els.logoutButton.hidden = !(authorized || retryLogout);
     els.logoutButton.textContent = retryLogout ? '退出登录（重试清理）' : '退出登录';
     els.logoutButton.disabled = state.connectPending;

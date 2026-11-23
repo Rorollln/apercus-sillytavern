@@ -463,6 +463,9 @@ function resetAll() {
     mod.state.balanceError = null;
     mod.state.contextMeter = { used: null, max: null };
     mod.state.authIdentity = null;
+    mod.state.connectPending = false;
+    mod.state.connectError = null;
+    mod.state.connectStatus = null;
     // 递增而非归零：让上一测试遗留的在途请求成为旧世代。
     mod.state.authGeneration += 1;
     mod.state.wasAuthorized = false;
@@ -1972,6 +1975,37 @@ test('G10: invalid + login_invalidated keeps a retryable logout button', async (
     await settle();
     assert.equal(logoutCalls, 1);
     assert.equal(mod.els.logoutButton.hidden, false);
+});
+
+test('G10b: confirmed login cleanup hides the retryable logout button', async () => {
+    resetAll();
+    queryFixtures.status = {
+        ...statusPayload(),
+        state: 'invalid',
+        reason: 'login_invalidated',
+        local_cleared: true,
+        custom_cleared: true,
+    };
+    delete queryFixtures.status.username;
+    await mod.refreshStatus();
+    await settle();
+    // 清理已确认：重试 logout 只会因无信封的 Custom 条目变成 uncertain
+    // 并强制清空用户设置，因此不给重试入口，改为重新连接提示。
+    assert.equal(mod.els.logoutButton.hidden, true);
+    assert.ok(mod.els.loginNote.textContent.includes('登录已失效'));
+
+    queryFixtures.status = {
+        ...statusPayload(),
+        state: 'invalid',
+        reason: 'login_invalidated',
+        local_cleared: true,
+        custom_cleared: false,
+    };
+    delete queryFixtures.status.username;
+    await mod.refreshStatus();
+    await settle();
+    assert.equal(mod.els.logoutButton.hidden, false);
+    assert.ok(mod.els.logoutButton.textContent.includes('重试清理'));
 });
 
 // ===== G11：授权页打开时序 =====
