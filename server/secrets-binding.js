@@ -430,12 +430,30 @@ function createSecretBindingAdapter(options) {
                 // 清理失去归属依据）。
                 return { envelope: false, custom: false };
             }
+            // W10：信封不存在时没有归属依据。若 Custom 命名空间仍有条目，
+            // 无法证明其中没有残留的插件 key → 标记 uncertain；调用方据此
+            // 报告 custom_cleared:false 并强制清空 URL，而不是假定已清。
+            let customUncertain = false;
+            if (state.status === 'empty' && typeof manager.getAllSecrets === 'function') {
+                try {
+                    const secrets = manager.getAllSecrets();
+                    const entries = secrets && typeof secrets === 'object'
+                        ? secrets[CUSTOM_SOURCE_NAMESPACE]
+                        : undefined;
+                    customUncertain = entries !== undefined && entries !== null
+                        && !(Array.isArray(entries) && entries.length === 0);
+                } catch {
+                    customUncertain = true;
+                }
+            }
             const envelope = await deleteEnvelopeNamespace(manager);
             if (envelope) {
                 // H3：信封已清，待同步标记不再有意义。
                 customSyncPending.delete(directories.root);
             }
-            return { envelope, custom: true };
+            return customUncertain
+                ? { envelope, custom: true, customUncertain: true }
+                : { envelope, custom: true };
         } catch {
             return { envelope: false, custom: false };
         }
@@ -710,6 +728,32 @@ function createSecretBindingAdapter(options) {
         }
     }
 
+    // W10：无信封时判断 Custom 命名空间是否仍有条目。返回 {known,present}；
+    // known=false（读失败/管理器不可用）时调用方不得声称已清。
+    async function hasCustomSourceEntries(directories) {
+        const Manager = await loadSecretManager();
+        if (!Manager || !validDirectories(directories)) {
+            return { known: false, present: false };
+        }
+        try {
+            const manager = new Manager(directories);
+            if (typeof manager.getAllSecrets !== 'function') {
+                return { known: false, present: false };
+            }
+            const secrets = manager.getAllSecrets();
+            if (!secrets || typeof secrets !== 'object') {
+                return { known: false, present: false };
+            }
+            const entries = secrets[CUSTOM_SOURCE_NAMESPACE];
+            if (entries === undefined || entries === null) return { known: true, present: false };
+            if (Array.isArray(entries)) return { known: true, present: entries.length > 0 };
+            if (typeof entries === 'string') return { known: true, present: entries.length > 0 };
+            return { known: false, present: false };
+        } catch {
+            return { known: false, present: false };
+        }
+    }
+
     // 单独停用 Custom 源（logout / 查询面 401 用 clearBinding；本方法留给
     // 需要按 key 归属清理的路径）。必须传插件写入的 key；不整命名空间清空。
     async function clearCustomSourceKeyPublic(directories, key) {
@@ -778,6 +822,7 @@ function createSecretBindingAdapter(options) {
         refreshKey,
         writeCustomSourceKey,
         clearCustomSourceKey: clearCustomSourceKeyPublic,
+        hasCustomSourceEntries,
         retryCustomSync,
     };
 }

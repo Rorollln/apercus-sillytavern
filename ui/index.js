@@ -4,8 +4,9 @@
  * Source-checked against SillyTavern 1.17.0 files only (st-context.js getContext,
  * events.js event names, openai.js custom source, chat-completions.js custom
  * URL assembly and json_schema mapping, script.js context budget, preset-manager.js
- * preset objects, #leftSendForm). It has not been loaded in a running
- * SillyTavern; other versions are not checked.
+ * preset objects, #leftSendForm). It has been loaded and smoke-tested in a
+ * local SillyTavern 1.17.0 instance; smoke is not acceptance, and other
+ * versions are not checked.
  *
  * Current boundary:
  * - Reads: /api/plugins/apercus-gateway status, connect/status, keys, models,
@@ -837,13 +838,20 @@ async function runApplyModel(name, switchSource, applySeq, applyPresetSeq) {
         body: JSON.stringify({ model: name, switchSource }),
     });
     if (!result.ok) {
+        // W10b：登录失效时先强制清空 Custom URL，再刷新状态；随后失败路径
+        // 不得回滚到旧快照（那会把可能残留的网关 key 配到第三方地址）。
+        const loginInvalid = isLoginInvalidResult(result);
+        if (loginInvalid) {
+            await clearCustomUrlAfterLoginClear(true);
+            reportLoginInvalid((message) => agToast('warning', message));
+        }
         const error = errorFrom(result, '服务器未确认接入');
         // F10/G1：只有服务端明确拒绝（4xx / 完全未写的 custom_source_write_failed）
         // 才回滚到第三方 URL；custom_source_write_partial、网络不确定（status 0 /
         // 超时 / 其他 5xx）保留网关 URL——回滚到可能已收到 key 的第三方源比停留
         // 在网关更危险，且 key 归属未知，需要重新武装清理。
         const rollback = L.shouldRollbackApplyModel(result.status, error.code);
-        const canRestore = rollback && canRestoreApplySnapshot(applyPresetSeq);
+        const canRestore = rollback && !loginInvalid && canRestoreApplySnapshot(applyPresetSeq);
         if (!rollback) antitrunc.customKeyPresent = null;
         if (applySeq === modelRequestSeq) {
             modelDialogConfirm.disabled = false;
@@ -1118,6 +1126,12 @@ function renderStatus() {
 
     const value = state.status.value;
     const authorized = L.isAuthorized(state.status);
+    // W9/W10：登录失效时按服务端确认的 Custom 清理结果处理：Custom 已清
+    // 且 URL 仍指向网关 → 清空；Custom 未确认清理 → 强制清空 Custom URL，
+    // 防止残留的网关 key 被发往第三方或重新激活的用户 key 被发往网关。
+    if (value.state === 'invalid' && value.reason === 'login_invalidated') {
+        void clearCustomUrlAfterLoginClear(value.custom_cleared !== true);
+    }
     // H4：授权身份变化（username 变化或重新授权）→ 新的连接世代；清空旧账号
     // 缓存后再重新拉取。未授权时身份置空，下一次授权按新世代处理。
     const accountChanged = authorized ? noteAuthorizedIdentity(value) : false;
@@ -1464,6 +1478,10 @@ async function doLogout() {
     }
     // F11：服务端确认本地两命名空间已清；本地“插件持有 Custom key”记录归零。
     antitrunc.customKeyPresent = false;
+    // W9/W10：服务端确认两命名空间已清；若 Custom 清理结果不确定
+    // (custom_cleared=false)，强制清空 Custom URL，避免残留 key 配对。
+    const customClearConfirmed = payload.custom_cleared === true;
+    const clearedCustom = await clearCustomUrlAfterLoginClear(!customClearConfirmed);
     // I2：会话已清，旧的同 URL 清理节流窗口不再有意义。
     resetCustomCleanupThrottle();
     // H4：退出登录即新世代，旧账号数据/在途响应一律作废。
@@ -1474,17 +1492,24 @@ async function doLogout() {
     await refreshStatus();
     if (!remoteRevoked) {
         // S2：远端撤销失败时本地仍已清理，但网关侧凭据可能仍有效。
-        setConnectNote('已退出本地登录；远端凭据可能仍有效，请到门户“退出所有酒馆插件”兜底撤销。');
+        setConnectNote(clearedCustom
+            ? '已退出本地登录；远端凭据可能仍有效，请到门户“退出所有酒馆插件”兜底撤销。已清空指向网关的 Custom URL/模型，请重新选择模型。'
+            : '已退出本地登录；远端凭据可能仍有效，请到门户“退出所有酒馆插件”兜底撤销。');
     } else {
-        setConnectNote('已退出登录。');
+        setConnectNote(clearedCustom
+            ? '已退出登录。已清空指向网关的 Custom URL/模型，请重新选择模型。'
+            : '已退出登录。');
     }
 }
 
 // 查询面 409 not_connected 可能是「本地无登录」或「查询面 401 已清本地」；
-// 后者转登录失效提示并重读 /status（服务端已标记 invalid）。
+// 服务端对后者使用固定的“登录已失效”文案。只有该文案才触发登录失效清理，
+// 普通未连接不能清空用户 Custom 设置。
 function isLoginInvalidResult(result) {
     const error = errorFrom(result, '');
-    return !!result && result.status === 409 && error.code === 'not_connected';
+    if (!result || result.status !== 409 || error.code !== 'not_connected') return false;
+    const message = typeof error.message === 'string' ? error.message : '';
+    return message.includes('登录已失效') || message.includes('登录已撤销');
 }
 
 function reportLoginInvalid(messageSetter) {
@@ -1995,6 +2020,64 @@ function ensureSectionsCache() {
     return ns.sectionsCache;
 }
 
+// W9/W10：退出登录或登录失效清理后，若 Custom 源仍指向网关（或清理未确认），
+// 清空 Custom URL/model，避免 ST deleteSecret 重新激活的用户自有 key继续发往
+// 网关、或残留的网关 key 被发往第三方端点。不猜测/恢复旧 URL；用户重新选择
+// 模型即可。force=true 用于 Custom 清理失败（任何 Custom URL 都清空）。
+let customUrlClearInFlight = null;
+
+// 只按 hostname 判断是否网关数据面（忽略协议/端口/路径/查询/userinfo）：
+// 清理阶段宁可多清一次，也不能把「看起来不是网关」的变体留在原地。
+function isGatewayDataHostUrl(value) {
+    if (typeof value !== 'string' || value.length === 0) return false;
+    let parsed;
+    try {
+        parsed = new URL(value);
+    } catch {
+        return false;
+    }
+    return parsed.hostname.replace(/\.$/, '') === L.GATEWAY_DATA_HOST;
+}
+
+async function clearCustomUrlAfterLoginClear(force) {
+    if (customUrlClearInFlight) return customUrlClearInFlight;
+    const run = (async () => {
+        const settings = freshChatSettings();
+        if (!settings) return false;
+        const forceClear = force === true;
+        const url = settings.custom_url;
+        const nonString = typeof url !== 'string';
+        if (forceClear) {
+            if (!nonString && url.length === 0
+                && typeof settings.custom_model === 'string'
+                && settings.custom_model.length === 0) {
+                return false;
+            }
+        } else {
+            if (nonString) {
+                // 非字符串 URL 无法证明安全（ST 会在请求时 stringify）。
+            } else if (!isGatewayDataHostUrl(url)) {
+                return false;
+            }
+        }
+        settings.custom_url = '';
+        settings.custom_model = '';
+        const saved = await persistSettings();
+        state.settingsSaveUncertain = saved.uncertain === true;
+        syncNativeCustomDisplay('', '');
+        if (!saved.ok) {
+            agToast('warning', '已退出登录，但清空 Custom URL/模型未确认落盘；请检查设置后再生成。');
+        }
+        return true;
+    })();
+    customUrlClearInFlight = run;
+    try {
+        return await run;
+    } finally {
+        if (customUrlClearInFlight === run) customUrlClearInFlight = null;
+    }
+}
+
 // 唯一持久化键：sectionsCache[结构层指纹] = {sections, layers, layeredFingerprint,
 // presetName, lastUsedAt}（明文、非敏感；凭据与 key 绝不进 extensionSettings）。
 // 每预设 ≤3 条、全局 ≤20 条由 logic 按 lastUsedAt LRU 淘汰。
@@ -2489,6 +2572,15 @@ async function requestPlan(model, prompt) {
         timeoutMs: PLAN_TIMEOUT_MS,
     });
     if (!result.ok) {
+        // W10b：/plan 的 409 not_connected 可能是数据面 401 触发的登录失效；
+        // 立即刷新状态，让 W9/W10 的 Custom URL 清理在本次失败后执行，而不是
+        // 等到下一次周期状态刷新。
+        if (isLoginInvalidResult(result)) {
+            // 先强制清空 Custom URL，再刷新状态：即使 /status 慢/失败，也不能
+            // 让可能残留的 key 继续发往网关或第三方端点。
+            await clearCustomUrlAfterLoginClear(true);
+            reportLoginInvalid((message) => antitruncToast('warning', message));
+        }
         return { ok: false, text: '', summary: describeError(result, '分节规划请求失败') };
     }
     if (!isPlainObj(result.json) || typeof result.json.text !== 'string') {

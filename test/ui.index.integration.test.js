@@ -2340,11 +2340,166 @@ test('W8b: a preset change that does not own custom_url still restores the pre-a
     assert.ok(lastToast('warning').message.includes('已恢复原 Custom 设置'));
 });
 
+test('W9: logout clears a gateway Custom URL after the plugin key is removed', async () => {
+    resetAll();
+    ctx.chatCompletionSettings.chat_completion_source = 'custom';
+    ctx.chatCompletionSettings.custom_url = 'https://third-party.example/v1';
+    ctx.chatCompletionSettings.custom_model = 'user-model';
+    await mod.refreshStatus();
+    await settle();
+    await mod.refreshModels();
+    await settle();
+    modelRow('model-a').click();
+    mod.modelDialogConfirm.click();
+    await settle();
+    assert.equal(ctx.chatCompletionSettings.custom_url, 'https://api.apercus.ai/v1');
+    assert.equal(ctx.chatCompletionSettings.custom_model, 'model-a');
+
+    queryFixtures.logout = { status: 'logged_out', remote_revoked: true, local_cleared: true };
+    queryFixtures.status = { ...statusPayload(), state: 'not_connected' };
+    delete queryFixtures.status.username;
+    await mod.doLogout();
+    await settle();
+
+    // ST deleteSecret 可能重新激活用户自有 key；清空网关 URL/model，避免
+    // 该 key 被发往网关。插件不猜恢复旧 URL。
+    assert.equal(ctx.chatCompletionSettings.custom_url, '');
+    assert.equal(ctx.chatCompletionSettings.custom_model, '');
+    assert.equal(globalThis.document.nativeInputs.custom_api_url_text.value, '');
+    assert.equal(globalThis.document.nativeInputs.custom_model_id.value, '');
+    assert.equal(ctx.extensionSettings.apercusGateway?.modelApplyBaseline, undefined);
+    assert.ok(mod.els.loginNote.textContent.includes('已清空指向网关的 Custom URL/模型'));
+});
+
+test('W9b: logout without a baseline clears the gateway Custom URL instead of leaving it', async () => {
+    resetAll();
+    ctx.chatCompletionSettings.chat_completion_source = 'custom';
+    ctx.chatCompletionSettings.custom_url = 'https://api.apercus.ai/v1';
+    ctx.chatCompletionSettings.custom_model = 'old-model';
+    await mod.refreshStatus();
+    await settle();
+    queryFixtures.logout = { status: 'logged_out', remote_revoked: true, local_cleared: true };
+    queryFixtures.status = { ...statusPayload(), state: 'not_connected' };
+    delete queryFixtures.status.username;
+    await mod.doLogout();
+    await settle();
+
+    assert.equal(ctx.chatCompletionSettings.custom_url, '');
+    assert.equal(ctx.chatCompletionSettings.custom_model, '');
+    assert.equal(globalThis.document.nativeInputs.custom_api_url_text.value, '');
+    assert.equal(globalThis.document.nativeInputs.custom_model_id.value, '');
+});
+
+test('W10: login_invalidated clears Custom settings based on custom_cleared and gateway URL variants', async () => {
+    resetAll();
+    ctx.chatCompletionSettings.chat_completion_source = 'custom';
+    ctx.chatCompletionSettings.custom_url = 'https://api.apercus.ai/v1';
+    ctx.chatCompletionSettings.custom_model = 'model-a';
+
+    // Custom 清理失败：残留的网关 key 不能与任何地址配对，强制清空 URL。
+    queryFixtures.status = {
+        ...statusPayload(),
+        state: 'invalid',
+        reason: 'login_invalidated',
+        local_cleared: false,
+        custom_cleared: false,
+    };
+    delete queryFixtures.status.username;
+    await mod.refreshStatus();
+    await settle();
+    assert.equal(ctx.chatCompletionSettings.custom_url, '');
+    assert.equal(ctx.chatCompletionSettings.custom_model, '');
+
+    // Custom 已清 + 非规范写法的网关 URL（尾斜杠）仍必须按网关识别并清空。
+    ctx.chatCompletionSettings.custom_url = 'https://api.apercus.ai/v1/';
+    ctx.chatCompletionSettings.custom_model = 'model-b';
+    queryFixtures.status = {
+        ...statusPayload(),
+        state: 'invalid',
+        reason: 'login_invalidated',
+        local_cleared: false,
+        custom_cleared: true,
+    };
+    delete queryFixtures.status.username;
+    await mod.refreshStatus();
+    await settle();
+    assert.equal(ctx.chatCompletionSettings.custom_url, '');
+    assert.equal(ctx.chatCompletionSettings.custom_model, '');
+
+    // Custom 已清 + 用户自己的第三方 URL：保留用户配置，不清空。
+    ctx.chatCompletionSettings.custom_url = 'https://third-party.example/v1';
+    ctx.chatCompletionSettings.custom_model = 'user-model';
+    await mod.refreshStatus();
+    await settle();
+    assert.equal(ctx.chatCompletionSettings.custom_url, 'https://third-party.example/v1');
+    assert.equal(ctx.chatCompletionSettings.custom_model, 'user-model');
+
+    // 非规范网关变体（http + 非默认端口）也必须清空。
+    ctx.chatCompletionSettings.custom_url = 'http://api.apercus.ai:8080/v1';
+    ctx.chatCompletionSettings.custom_model = 'model-c';
+    await mod.refreshStatus();
+    await settle();
+    assert.equal(ctx.chatCompletionSettings.custom_url, '');
+
+    // 非字符串 URL：清理失败路径必须强制清空，不能因类型异常放行。
+    ctx.chatCompletionSettings.custom_url = ['https://evil.example/v1'];
+    ctx.chatCompletionSettings.custom_model = 'model-d';
+    queryFixtures.status = {
+        ...statusPayload(),
+        state: 'invalid',
+        reason: 'login_invalidated',
+        local_cleared: false,
+        custom_cleared: false,
+    };
+    delete queryFixtures.status.username;
+    await mod.refreshStatus();
+    await settle();
+    assert.equal(ctx.chatCompletionSettings.custom_url, '');
+    assert.equal(ctx.chatCompletionSettings.custom_model, '');
+
+    // Custom 清理未确认时，即使 source 不是 custom 也强制清空 URL。
+    ctx.chatCompletionSettings.chat_completion_source = 'openai';
+    ctx.chatCompletionSettings.custom_url = 'https://third-party.example/v1';
+    await mod.refreshStatus();
+    await settle();
+    assert.equal(ctx.chatCompletionSettings.custom_url, '');
+});
+
+test('W10c: a login-invalid apply response refreshes status and clears the gateway Custom URL', async () => {
+    resetAll();
+    ctx.chatCompletionSettings.chat_completion_source = 'custom';
+    ctx.chatCompletionSettings.custom_url = 'https://api.apercus.ai/v1';
+    ctx.chatCompletionSettings.custom_model = 'model-a';
+    await mod.refreshStatus();
+    await settle();
+    await mod.refreshModels();
+    await settle();
+    queryFixtures.applyStatus = 409;
+    queryFixtures.apply = { error: { code: 'not_connected', message: '登录已失效' } };
+    queryFixtures.status = {
+        ...statusPayload(),
+        state: 'invalid',
+        reason: 'login_invalidated',
+        local_cleared: false,
+        custom_cleared: false,
+    };
+    delete queryFixtures.status.username;
+    modelRow('model-a').click();
+    mod.modelDialogConfirm.click();
+    await settle();
+
+    assert.equal(mod.state.status.value.state, 'invalid');
+    assert.equal(ctx.chatCompletionSettings.custom_url, '');
+    assert.equal(ctx.chatCompletionSettings.custom_model, '');
+});
+
 test('W5: successful apply syncs the native Custom URL and model display fields', async () => {
     resetAll();
     ctx.chatCompletionSettings.chat_completion_source = 'openai';
     globalThis.document.nativeInputs.custom_api_url_text.value = 'https://old-third-party.example/v1';
     globalThis.document.nativeInputs.custom_model_id.value = 'old-model';
+    await mod.refreshStatus();
+    await settle();
     await mod.refreshModels();
     await settle();
     modelRow('model-a').click();

@@ -170,6 +170,13 @@ test('status v3: four states, optional username, and st_connection are strict', 
     assert.equal(L.parseStatus({ ...PLUGIN_STATUS }).value.connect_pending, false);
     assert.equal(L.parseStatus({ ...PLUGIN_STATUS, state: 'authorized', connect_pending: true }).value.connect_pending, true);
     assert.equal(L.parseStatus({ ...PLUGIN_STATUS, connect_pending: 'true' }).ok, false);
+    // W10：local_cleared 同口径，可缺省；只在 invalid/login_invalidated 时有意义。
+    assert.equal(L.parseStatus({ ...PLUGIN_STATUS }).value.local_cleared, false);
+    assert.equal(L.parseStatus({ ...PLUGIN_STATUS, state: 'invalid', local_cleared: true }).value.local_cleared, true);
+    assert.equal(L.parseStatus({ ...PLUGIN_STATUS, local_cleared: 'yes' }).ok, false);
+    assert.equal(L.parseStatus({ ...PLUGIN_STATUS }).value.custom_cleared, false);
+    assert.equal(L.parseStatus({ ...PLUGIN_STATUS, state: 'invalid', custom_cleared: true }).value.custom_cleared, true);
+    assert.equal(L.parseStatus({ ...PLUGIN_STATUS, custom_cleared: 'yes' }).ok, false);
     assert.equal(L.parseStatus({ ...PLUGIN_STATUS, connected: false, authAvailable: false }).ok, true);
     assert.equal(L.isAuthorized({ ok: false }), false);
 });

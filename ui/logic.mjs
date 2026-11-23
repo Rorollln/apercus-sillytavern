@@ -179,6 +179,10 @@ export function parseStatus(payload) {
     if (typeof connected !== 'boolean') return { ok: false, reason: 'status_connected_invalid' };
     const connectPending = payload.connect_pending === undefined ? false : payload.connect_pending;
     if (typeof connectPending !== 'boolean') return { ok: false, reason: 'status_connect_pending_invalid' };
+    const localCleared = payload.local_cleared === undefined ? false : payload.local_cleared;
+    if (typeof localCleared !== 'boolean') return { ok: false, reason: 'status_local_cleared_invalid' };
+    const customCleared = payload.custom_cleared === undefined ? false : payload.custom_cleared;
+    if (typeof customCleared !== 'boolean') return { ok: false, reason: 'status_custom_cleared_invalid' };
     const code = payload.code === undefined ? '' : payload.code;
     const message = payload.message === undefined ? '' : payload.message;
     if (typeof code !== 'string') return { ok: false, reason: 'status_code_invalid' };
@@ -207,6 +211,8 @@ export function parseStatus(payload) {
             authAvailable,
             connected,
             connect_pending: connectPending,
+            local_cleared: localCleared,
+            custom_cleared: customCleared,
             code,
             message,
             protocols: Object.freeze(protocols),

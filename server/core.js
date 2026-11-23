@@ -114,7 +114,7 @@ function statusCodeFor(state) {
     }
 }
 
-function buildStatusBody(record, hasSession, invalid, invalidReason) {
+function buildStatusBody(record, hasSession, invalid, invalidReason, loginLocalCleared, loginCustomCleared) {
     let state;
     let reason = null;
     let username = null;
@@ -152,6 +152,12 @@ function buildStatusBody(record, hasSession, invalid, invalidReason) {
         st_connection: { state: 'unknown' },
     };
     if (reason !== null) body.reason = reason;
+    if (state === 'invalid' && reason === LOGIN_INVALID_REASON) {
+        // W10：分别说明信封与 Custom 清理是否完整成功。UI 只在 Custom
+        // 清理确认成功（或 URL 仍为网关）时清空/恢复 Custom 设置。
+        body.local_cleared = loginLocalCleared === true;
+        body.custom_cleared = loginCustomCleared === true;
+    }
     if (username !== null) body.username = username;
     return body;
 }
@@ -813,6 +819,11 @@ function createCore(deps) {
     const readBindingState = deps && typeof deps.readBindingState === 'function'
         ? deps.readBindingState
         : null;
+    // W10：无信封时探测 Custom 命名空间是否仍有条目；缺省时 release 不能
+    // 断言“已无归属”，按 read_failed 保守处理。
+    const hasCustomSourceEntries = deps && typeof deps.hasCustomSourceEntries === 'function'
+        ? deps.hasCustomSourceEntries
+        : null;
 
     if (typeof readBinding !== 'function') {
         throw new TypeError('createCore requires readBinding(directories)');
@@ -932,17 +943,32 @@ function createCore(deps) {
         return marker;
     }
 
-    function markConnectInvalid(root, untilMs, reason) {
+    function markConnectInvalid(root, untilMs, reason, localCleared, customCleared) {
         const existing = connectInvalid.get(root);
         // H10：login_invalidated 是最高优先级标记，只能由 approved 写库成功
         // 或 logout 完整清理成功清除；连接请求层面的失效（poll 404 / 取消 /
         // 过期 / 授权写库重试耗尽）不得把它降级覆盖。
-        if (existing && existing.reason === LOGIN_INVALID_REASON) return;
+        if (existing && existing.reason === LOGIN_INVALID_REASON) {
+            // W10：后续清理确认成功可把 true 粘上去；显式的不确定/失败
+            // （false）必须能把旧的 true 降级，避免 /status 继续宣称已清。
+            if (localCleared === true) existing.localCleared = true;
+            if (customCleared === true) existing.customCleared = true;
+            else if (customCleared === false) existing.customCleared = false;
+            return;
+        }
         const until = typeof untilMs === 'number' ? untilMs : now() + CONNECT_TTL_MS;
         const markerReason = typeof reason === 'string' && reason.length > 0
             ? reason
             : CONNECT_INVALID_REASON;
-        connectInvalid.set(root, { untilMs: until, reason: markerReason });
+        connectInvalid.set(root, {
+            untilMs: until,
+            reason: markerReason,
+            // W10：分别记录信封与 Custom 清理结果。UI 只有在 Custom 清理
+            // 确认成功或 URL 仍指向网关时才恢复/清空 Custom 设置；清理失败
+            // 时强制清空 URL，绝不把残留 key 与新地址配对。
+            localCleared: localCleared === true,
+            customCleared: customCleared === true,
+        });
     }
 
     // 绑定读取只接收本请求的 req.user.directories；读取失败/无值/形态不符
@@ -995,10 +1021,14 @@ function createCore(deps) {
             // 读取期间 logout 可能已 bump 世代（logout 在取锁前同步 +1）。
             if (epochFor(root) !== startEpoch) return false;
             bumpEpoch(root);
+            let localCleared = false;
+            let customCleared = false;
             if (clearBinding) {
                 try {
                     // 已在锁内，直接调用（不可再次 withRootLock，否则自锁）。
-                    await clearBinding(directories);
+                    const cleared = normalizeClearResult(await clearBinding(directories));
+                    localCleared = cleared.envelope && cleared.custom;
+                    customCleared = cleared.custom && !cleared.customUncertain;
                 } catch {
                     // best effort：清失败不改变对外语义；失效标记仍由下面设置，
                     // 残留信封在 /status 中显示 invalid（fail-closed）。
@@ -1008,7 +1038,13 @@ function createCore(deps) {
             connectStarting.delete(root);
             // 失效标记不随 15 分钟连接 TTL 消失：否则清理失败留下的残留信封会在
             // TTL 后重新显示 authorized。新 approved 写入（F3/F4）才清除它。
-            markConnectInvalid(root, Number.POSITIVE_INFINITY, LOGIN_INVALID_REASON);
+            markConnectInvalid(
+                root,
+                Number.POSITIVE_INFINITY,
+                LOGIN_INVALID_REASON,
+                localCleared,
+                customCleared,
+            );
             loginProbeAt.delete(root);
             return true;
         });
@@ -1212,6 +1248,8 @@ function createCore(deps) {
                 session !== null,
                 loginInvalid,
                 loginInvalid ? LOGIN_INVALID_REASON : null,
+                marker !== null && marker.localCleared === true,
+                marker !== null && marker.customCleared === true,
             ));
         } catch (error) {
             sendError(res, error);
@@ -1638,7 +1676,23 @@ function createCore(deps) {
                         if (isValidBindingKey(key) && !keys.includes(key)) keys.push(key);
                     }
                 }
-                if (keys.length === 0) return { cleared: true };
+                if (keys.length === 0) {
+                    // W10：无信封时不能仅凭“没有 keys”断言已清；先探测
+                    // Custom 命名空间。仍有条目/无法读取 → read_failed，
+                    // UI 不得宣称“已清理插件写入的 key”。
+                    if (read.record === null) {
+                        if (!hasCustomSourceEntries) return { status: 'read_failed' };
+                        try {
+                            const probe = await hasCustomSourceEntries(directories);
+                            if (!probe || probe.known !== true || probe.present === true) {
+                                return { status: 'read_failed' };
+                            }
+                        } catch {
+                            return { status: 'read_failed' };
+                        }
+                    }
+                    return { cleared: true };
+                }
                 if (!clearCustomSourceKey) return { cleared: false };
                 try {
                     const normalized = normalizeCustomClearResult(
@@ -1670,12 +1724,13 @@ function createCore(deps) {
             return {
                 envelope: value.envelope === true,
                 custom: value.custom === true,
+                customUncertain: value.customUncertain === true,
             };
         }
         if (typeof value === 'boolean') {
-            return { envelope: value, custom: value };
+            return { envelope: value, custom: value, customUncertain: false };
         }
-        return { envelope: false, custom: false };
+        return { envelope: false, custom: false, customUncertain: false };
     }
 
     async function logoutHandler(req, res) {
@@ -1715,15 +1770,35 @@ function createCore(deps) {
             connectStarting.delete(root);
             if (!cleared.envelope || !cleared.custom) {
                 // 持久失效标记：残封信封不得在 /status 回 authorized（直到新登录）。
-                markConnectInvalid(root, Number.POSITIVE_INFINITY, LOGIN_INVALID_REASON);
+                markConnectInvalid(
+                    root,
+                    Number.POSITIVE_INFINITY,
+                    LOGIN_INVALID_REASON,
+                    false,
+                    cleared.custom && !cleared.customUncertain,
+                );
                 throw logoutLocalClearFailed();
             }
-            connectInvalid.delete(root);
-            loginProbeAt.delete(root);
+            if (cleared.customUncertain) {
+                // W10：Custom 归属无法确认。保留持久失效标记，让 /status 在
+                // 页面刷新/其他标签中也继续要求清理；响应仍报告本地已退出，
+                // 但 custom_cleared=false，UI 强制清空 Custom URL。
+                markConnectInvalid(
+                    root,
+                    Number.POSITIVE_INFINITY,
+                    LOGIN_INVALID_REASON,
+                    true,
+                    false,
+                );
+            } else {
+                connectInvalid.delete(root);
+                loginProbeAt.delete(root);
+            }
             sendJson(res, 200, {
                 status: 'logged_out',
                 remote_revoked: remoteRevoked,
                 local_cleared: true,
+                custom_cleared: !cleared.customUncertain,
             });
         } catch (error) {
             sendError(res, error);

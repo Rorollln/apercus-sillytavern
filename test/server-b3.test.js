@@ -117,6 +117,7 @@ function buildCore(overrides) {
         clearBinding: async (directories) => {
             writes.clear += 1;
             if (options.clearKeepsRecord !== true) store.delete(directories.root);
+            if (typeof options.clearResult === 'function') return options.clearResult();
             return options.clearResult === undefined ? true : options.clearResult;
         },
         refreshKey: async () => {
@@ -144,6 +145,9 @@ function buildCore(overrides) {
                 if (options.customClearThrows) throw new Error('clear failed');
                 return options.customClearResult === undefined ? true : options.customClearResult;
             },
+        hasCustomSourceEntries: options.hasCustomSourceEntries === undefined
+            ? async () => ({ known: true, present: false })
+            : options.hasCustomSourceEntries,
         retryCustomSync: options.retryCustomSync,
         gatewayClient: gateway.client,
         fetchImpl: options.fetchImpl || (async () => ({ status: 200, body: new ReadableStream({ start(controller) { controller.close(); } }) })),
@@ -257,6 +261,8 @@ test('query 401 clears the local login, reports invalid on /status, and stops la
     const status = await call(h.core.handlers.status, getReq('/status'));
     assert.equal(status.json().state, 'invalid');
     assert.equal(status.json().reason, 'login_invalidated');
+    assert.equal(status.json().local_cleared, true);
+    assert.equal(status.json().custom_cleared, true);
 
     // G4：login_invalidated 标记存在时查询面直接 409 login invalid，不再使用
     // 残留信封/调用上游，而不是退回通用的 not_connected 文案。
@@ -267,7 +273,11 @@ test('query 401 clears the local login, reports invalid on /status, and stops la
 });
 
 test('query 401 whose local clear fails still reports invalid and never re-authorizes (S5)', async () => {
-    const h = buildCore({ gateway: makeGateway({ modelsUnauthorized: true }), clearKeepsRecord: true });
+    const h = buildCore({
+        gateway: makeGateway({ modelsUnauthorized: true }),
+        clearKeepsRecord: true,
+        clearResult: { envelope: false, custom: false },
+    });
     h.store.set('/u/alice', makeAuthRecord());
     const result = await call(h.core.handlers.models, getReq('/models'));
     assert.equal(result.statusCode, 409);
@@ -276,6 +286,8 @@ test('query 401 whose local clear fails still reports invalid and never re-autho
 
     const status = await call(h.core.handlers.status, getReq('/status'));
     assert.equal(status.json().state, 'invalid');
+    assert.equal(status.json().local_cleared, false);
+    assert.equal(status.json().custom_cleared, false);
     assert.equal(Object.hasOwn(status.json(), 'username'), false);
 });
 
@@ -589,6 +601,38 @@ test('release-custom-key clears plugin-owned Custom keys using the envelope unio
     missing.store.set('/u/alice', makeAuthRecord());
     const cannot = await call(missing.core.handlers.releaseCustomKey, postReq('/release-custom-key', {}));
     assert.deepEqual(cannot.json(), { cleared: false });
+});
+
+test('release-custom-key does not claim cleared when the envelope is gone but Custom entries remain', async () => {
+    const h = buildCore({
+        hasCustomSourceEntries: async () => ({ known: true, present: true }),
+    });
+    const result = await call(h.core.handlers.releaseCustomKey, postReq('/release-custom-key', {}));
+    assert.equal(result.statusCode, 200);
+    assert.deepEqual(result.json(), { cleared: false, reason: 'read_failed' });
+    assert.equal(h.writes.customClear.length, 0);
+});
+
+test('W10: a later uncertain logout downgrades a stale custom_cleared:true marker', async () => {
+    let clearResult = { envelope: true, custom: true };
+    const h = buildCore({
+        gateway: makeGateway({ modelsUnauthorized: true }),
+        clearResult: () => clearResult,
+    });
+    h.store.set('/u/alice', makeAuthRecord());
+    const invalidated = await call(h.core.handlers.models, getReq('/models'));
+    assert.equal(invalidated.statusCode, 409);
+    const afterInvalidate = await call(h.core.handlers.status, getReq('/status'));
+    assert.equal(afterInvalidate.json().state, 'invalid');
+    assert.equal(afterInvalidate.json().custom_cleared, true);
+
+    clearResult = { envelope: true, custom: true, customUncertain: true };
+    const logout = await call(h.core.handlers.logout, postReq('/logout', {}));
+    assert.equal(logout.statusCode, 200);
+    assert.equal(logout.json().custom_cleared, false);
+    const afterLogout = await call(h.core.handlers.status, getReq('/status'));
+    assert.equal(afterLogout.json().state, 'invalid');
+    assert.equal(afterLogout.json().custom_cleared, false);
 });
 
 test('release-custom-key requires user, same-origin, and is rate-limited', async () => {

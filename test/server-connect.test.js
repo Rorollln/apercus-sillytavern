@@ -569,6 +569,7 @@ test('logout revokes remotely and always clears both local namespaces + session'
         status: 'logged_out',
         remote_revoked: true,
         local_cleared: true,
+        custom_cleared: true,
     });
     assert.equal(h.gateway.calls.logout.length, 1);
     assert.equal(h.gateway.calls.logout[0], LOGIN_CREDENTIAL);
@@ -605,6 +606,7 @@ test('logout still clears locally when the remote call fails or no binding exist
         status: 'logged_out',
         remote_revoked: false,
         local_cleared: true,
+        custom_cleared: true,
     });
     assert.equal(h.gateway.calls.logout.length, 1);
     assert.equal(h.clearCalls.length, 1);
@@ -616,9 +618,37 @@ test('logout still clears locally when the remote call fails or no binding exist
         status: 'logged_out',
         remote_revoked: false,
         local_cleared: true,
+        custom_cleared: true,
     });
     assert.equal(h.gateway.calls.logout.length, 1);
     assert.equal(h.clearCalls.length, 2);
+});
+
+test('logout reports custom_cleared=false when the envelope is gone but Custom entries remain', async () => {
+    const h = buildCore({
+        clearResult: { envelope: true, custom: true, customUncertain: true },
+    });
+    h.store.records.set('/u/alice', {
+        loginCredential: LOGIN_CREDENTIAL,
+        key: BINDING_KEY,
+        username: 'alice',
+    });
+    const result = await call(h.core.handlers.logout, logoutReq());
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.json().local_cleared, true);
+    assert.equal(result.json().custom_cleared, false);
+
+    // 不确定性必须持久到 /status：页面刷新/其他标签也要继续要求清理。
+    const status = await call(h.core.handlers.status, {
+        method: 'GET',
+        url: '/api/plugins/apercus-gateway/status',
+        headers: { host: 'localhost:8000' },
+        user: { directories: { root: '/u/alice' } },
+    });
+    assert.equal(status.json().state, 'invalid');
+    assert.equal(status.json().reason, 'login_invalidated');
+    assert.equal(status.json().local_cleared, true);
+    assert.equal(status.json().custom_cleared, false);
 });
 
 test('logout requires the user and same-origin write gate', async () => {
@@ -660,6 +690,8 @@ test('logout: local clear failure returns 502 logout_local_clear_failed and stat
     });
     assert.equal(status.json().state, 'invalid');
     assert.equal(status.json().reason, 'login_invalidated');
+    assert.equal(status.json().local_cleared, false);
+    assert.equal(status.json().custom_cleared, false);
     assert.equal(Object.hasOwn(status.json(), 'username'), false);
 
     const connectStatus = await call(h.core.handlers.connectStatus, statusReq());
@@ -1855,6 +1887,7 @@ test('H12: a gateway 401 on logout counts as already revoked (no "remote still v
         status: 'logged_out',
         remote_revoked: true,
         local_cleared: true,
+        custom_cleared: true,
     });
     assert.equal(h.store.records.has('/u/alice'), false);
 });

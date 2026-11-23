@@ -26,7 +26,7 @@
 
 `GET /status`、`POST /connect`、`GET /connect/status`、`POST /logout`、`GET /keys`、`GET /models`、`GET /balance`、`POST /plan`、`POST /apply-model`、`POST /release-custom-key`、`POST /login`（骨架，501）。
 
-> 规格草案 §2 计「7 新＋1 改」；实现偏离：另增 `POST /apply-model`（模型接入确认）与 `POST /release-custom-key`（运行时清理插件写入的 Custom 凭据）；`GET /connect/status` 的 pending 响应附加 `write_retry:{attempt,max}`（写入重试态）；`GET /status` 附加 `connect_pending`（独立于 state 表示仍有存活连接请求，用于已授权后重新发起的连接在刷新后恢复轮询）；v3 设计已无 `POST /login`，本仓仍保留骨架 501（待删）。以上待 C1 契约评审回写。
+> 规格草案 §2 计「7 新＋1 改」；实现偏离：另增 `POST /apply-model`（模型接入确认）与 `POST /release-custom-key`（运行时清理插件写入的 Custom 凭据）；`GET /connect/status` 的 pending 响应附加 `write_retry:{attempt,max}`（写入重试态）；`GET /status` 附加 `connect_pending`（独立于 state 表示仍有存活连接请求，用于已授权后重新发起的连接在刷新后恢复轮询）与 invalid 状态的 `local_cleared` / `custom_cleared`（登录失效时信封与 Custom 源的清理结果，UI 据此清空或保留 Custom 设置）；v3 设计已无 `POST /login`，本仓仍保留骨架 501（待删）。以上待 C1 契约评审回写。
 
 ## 目录内容
 
@@ -117,7 +117,7 @@ Pass 是未来唯一的身份权威。网关连接契约（v1.35 草稿）采用
 - **HTTPS 反代**：插件的写路由做精确同源校验；反向代理终止 TLS 时须设置 `X-Forwarded-Proto: https` 并透传原始 `Host`，否则写路由会 403（fail-closed）。
 - **规划请求上限**：`/plan` 请求体上限 64KiB（为容纳 ≤16000 字符 CJK 预设摘要；规格草案的 16KiB 与该摘要上限自相矛盾，按 64KiB 实施并登记）。
 - 多用户部署需同时满足上方多用户隔离条件，并满足 DNS rebinding 防护之一。
-- **Custom 源凭据提醒**：接入模型后网关 key 会写入当前用户的 `api_key_custom`（ST Custom 源读取的按用户凭据，非全局共享）。若随后切换到 `custom_url` 指向非网关地址的预设/配置，ST 会把该 key 发往该地址（`bind_preset_to_connection` 默认开启）——请勿将网关 key 与第三方端点混用；插件在预设切换与生成前**尽力**清理自己写入的条目，但 ST 自身的 Connect/Test 状态检查、手动编辑 URL、清理失败窗口不在自动清理覆盖内（清理失败即意味着 key 可能已外送）。退出登录/登录失效时只清除自己写入的条目。接入切换窗口内，原先的第三方 Custom key 也可能被短暂发往网关；预设 `custom_include_headers`/`custom_include_body` 中的第三方凭据在切换到网关源时也可能随请求发出，接入前请自行清理。
+- **Custom 源凭据提醒**：接入模型后网关 key 会写入当前用户的 `api_key_custom`（ST Custom 源读取的按用户凭据，非全局共享）。若随后切换到 `custom_url` 指向非网关地址的预设/配置，ST 会把该 key 发往该地址（`bind_preset_to_connection` 默认开启）——请勿将网关 key 与第三方端点混用；插件在预设切换与生成前**尽力**清理自己写入的条目，但 ST 自身的 Connect/Test 状态检查、手动编辑 URL、清理失败窗口不在自动清理覆盖内（清理失败即意味着 key 可能已外送）。退出登录/登录失效时只清除自己写入的条目；清理后若 Custom 源 URL 仍指向网关，UI 会清空 Custom URL/模型（不猜旧地址，用户重新选择模型），避免 ST 删除活动条目后重新激活的用户自有 key 继续发往网关；登录失效按服务端 `custom_cleared`：Custom 清理未确认时强制清空 Custom URL，Custom 已清且用户 URL 为第三方地址时保留用户配置（清空落盘未确认时会显式提示）。接入切换窗口内，原先的第三方 Custom key 也可能被短暂发往网关；预设 `custom_include_headers`/`custom_include_body` 中的第三方凭据在切换到网关源时也可能随请求发出，接入前请自行清理。
 - **Key 列表**：v1 恒一把 key，列表只读展示（名称/脱敏标识/状态）；多 key 选用交互待 C1 冻结后补。
 
 ### 协议声明

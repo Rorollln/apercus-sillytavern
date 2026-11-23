@@ -89,6 +89,7 @@ async function init(router) {
         refreshKey: bindingAdapter.refreshKey,
         writeCustomSourceKey: bindingAdapter.writeCustomSourceKey,
         clearCustomSourceKey: bindingAdapter.clearCustomSourceKey,
+        hasCustomSourceEntries: bindingAdapter.hasCustomSourceEntries,
         retryCustomSync: bindingAdapter.retryCustomSync,
         allowedHosts: readAllowedHosts(),
         gatewayClient,

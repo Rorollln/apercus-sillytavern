@@ -476,6 +476,18 @@ test('clearBinding cleans Custom first and keeps the envelope when Custom cleanu
     assert.deepEqual(okStore.api_key_custom.map((entry) => entry.value), ['user-own-key']);
 });
 
+test('W10: an absent envelope with remaining Custom entries is reported uncertain', async () => {
+    const store = {
+        api_key_custom: customList({ id: 1, value: 'user-or-stale-key', active: true }),
+    };
+    const { Manager } = makeManager(store);
+    const adapter = makeAdapter(Manager);
+    const result = await adapter.clearBinding(DIRS);
+    assert.deepEqual(result, { envelope: true, custom: true, customUncertain: true });
+    // 无信封就没有归属依据；不删除用户/未知 Custom 条目。
+    assert.equal(store.api_key_custom.length, 1);
+});
+
 test('H6: clearBinding refuses a corrupt/unreadable envelope without deleting or claiming success', async () => {
     const store = {
         apercus_gateway: '{bad',
